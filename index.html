@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Social Network Analysis — UTA Social Work</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f7fa; overflow: hidden; }
+
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* Top bar */
+  #topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px;
+    background: #fff;
+    border-bottom: 1px solid #e2e6ea;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    z-index: 10;
+    flex-shrink: 0;
+  }
+  #topbar h1 { font-size: 15px; font-weight: 700; color: #1a2e44; margin-right: 10px; }
+  .btn {
+    padding: 6px 14px; border-radius: 6px; border: 1.5px solid #c9d3de;
+    background: #fff; cursor: pointer; font-size: 13px; font-weight: 500; color: #2d4059;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn:hover { background: #eaf1fb; border-color: #3a7bd5; }
+  .btn.active { background: #3a7bd5; color: #fff; border-color: #3a7bd5; }
+
+  .legend { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .legend-sq { width: 12px; height: 12px; display: inline-block; border-radius: 2px; }
+
+  /* Main area */
+  #main { display: flex; flex: 1; overflow: hidden; position: relative; }
+
+  #graph-container { flex: 1; position: relative; overflow: hidden; }
+  svg { width: 100%; height: 100%; display: block; }
+
+  /* Info panel */
+  #info-panel {
+    position: absolute;
+    bottom: 20px; right: 20px;
+    width: 300px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.14);
+    padding: 20px;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 100;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  #info-panel.hidden { opacity: 0; pointer-events: none; transform: translateY(8px); }
+
+  #panel-title { font-size: 18px; font-weight: 700; color: #1a2e44; margin-bottom: 4px; word-break: break-word; }
+  #panel-type { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px; }
+  #panel-type.person { color: #e67e22; }
+  #panel-type.interest { color: #3a7bd5; }
+
+  .info-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: flex-start; font-size: 13px; }
+  .info-label { font-weight: 600; color: #888; min-width: 72px; flex-shrink: 0; }
+  .info-value { color: #2d4059; word-break: break-word; }
+  .info-value a { color: #3a7bd5; text-decoration: none; }
+  .info-value a:hover { text-decoration: underline; }
+
+  .conn-count { font-size: 22px; font-weight: 700; color: #1a2e44; }
+  .conn-label { font-size: 12px; color: #888; margin-bottom: 12px; }
+
+  #conn-list { margin-top: 10px; }
+  #conn-list-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin-bottom: 8px; }
+  .conn-chip {
+    display: inline-block; margin: 2px 3px 2px 0;
+    padding: 3px 8px; border-radius: 12px; font-size: 12px;
+    cursor: pointer; border: none; font-family: inherit;
+    transition: opacity 0.15s;
+  }
+  .conn-chip:hover { opacity: 0.8; }
+  .conn-chip.person { background: #fff3e0; color: #b05e00; }
+  .conn-chip.interest { background: #e8f0fe; color: #1a56c4; }
+
+  #close-panel {
+    position: absolute; top: 12px; right: 14px;
+    background: none; border: none; cursor: pointer;
+    font-size: 18px; color: #aaa; line-height: 1;
+  }
+  #close-panel:hover { color: #555; }
+
+  /* tooltip */
+  #tooltip {
+    position: absolute; pointer-events: none;
+    background: rgba(26,46,68,0.88); color: #fff;
+    padding: 5px 10px; border-radius: 6px; font-size: 12px;
+    white-space: nowrap; z-index: 200;
+    display: none;
+  }
+
+  /* node styles */
+  .node { cursor: pointer; }
+  .node.person rect { fill: #f0a500; stroke: #fff; stroke-width: 1.5px; }
+  .node.interest rect { fill: #4a7fc1; stroke: #fff; stroke-width: 1.5px; }
+  .node.highlighted.person rect { stroke: #c0392b; stroke-width: 3px; }
+  .node.highlighted.interest rect { stroke: #c0392b; stroke-width: 3px; }
+  .node.dimmed { opacity: 0.2; }
+  .node text { pointer-events: none; font-size: 10px; fill: #1a2e44; font-family: 'Segoe UI', Arial, sans-serif; }
+
+  .link { stroke: #b0bec5; stroke-opacity: 0.55; }
+  .link.highlighted { stroke: #e74c3c; stroke-opacity: 0.9; stroke-width: 2px; }
+  .link.dimmed { stroke-opacity: 0.05; }
+
+  /* search */
+  #search-wrap { position: relative; }
+  #search {
+    padding: 6px 12px; border-radius: 6px; border: 1.5px solid #c9d3de;
+    font-size: 13px; width: 200px; outline: none;
+  }
+  #search:focus { border-color: #3a7bd5; }
+  #search-results {
+    position: absolute; top: 100%; left: 0; width: 100%;
+    background: #fff; border: 1.5px solid #c9d3de; border-top: none;
+    border-radius: 0 0 6px 6px; z-index: 999; max-height: 200px; overflow-y: auto;
+    display: none;
+  }
+  .search-item {
+    padding: 6px 12px; cursor: pointer; font-size: 13px; color: #2d4059;
+  }
+  .search-item:hover { background: #eaf1fb; }
+  .search-item .badge {
+    font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 8px; margin-left: 6px;
+  }
+  .badge.person { background: #fff3e0; color: #b05e00; }
+  .badge.interest { background: #e8f0fe; color: #1a56c4; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <h1>🔗 UTA Social Work — Network Analysis</h1>
+    <button class="btn" id="btn-reset">Reset View</button>
+    <button class="btn" id="btn-fit">Fit to Screen</button>
+    <button class="btn" id="btn-pause">Pause Motion</button>
+    <div id="search-wrap">
+      <input id="search" type="text" placeholder="Search node…" autocomplete="off"/>
+      <div id="search-results"></div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#f0a500"></span> Person</div>
+      <div class="legend-item"><span class="legend-sq" style="background:#4a7fc1"></span> Interest</div>
+    </div>
+  </div>
+  <div id="main">
+    <div id="graph-container">
+      <svg id="svg"></svg>
+      <div id="tooltip"></div>
+    </div>
+    <div id="info-panel" class="hidden">
+      <button id="close-panel">✕</button>
+      <div id="panel-title"></div>
+      <div id="panel-type"></div>
+      <div id="person-details" style="display:none">
+        <div class="info-row"><span class="info-label">Role</span><span class="info-value" id="p-role"></span></div>
+        <div class="info-row"><span class="info-label">Institution</span><span class="info-value" id="p-inst"></span></div>
+        <div class="info-row"><span class="info-label">Email</span><span class="info-value" id="p-email"></span></div>
+        <div class="info-row"><span class="info-label">Profile</span><span class="info-value" id="p-url"></span></div>
+        <hr style="margin:12px 0; border:none; border-top:1px solid #eee;">
+      </div>
+      <div class="conn-count" id="conn-count"></div>
+      <div class="conn-label">Total Connections</div>
+      <div id="conn-list">
+        <div id="conn-list-title">Connected To</div>
+        <div id="conn-chips"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const graphData = {"nodes":[{"id":"Administrative_practice","type":"interest","degree":2},{"id":"Adoptions","type":"interest","degree":3},{"id":"Akshay_Thakare","type":"person","degree":10},{"id":"Alan_Kunz_Lomelin","type":"person","degree":7},{"id":"Blessing_Ramsey-Soroghaye","type":"person","degree":13},{"id":"Carol_Lee","type":"person","degree":8},{"id":"Chenyu_Zhao","type":"person","degree":15},{"id":"Child_welfare","type":"interest","degree":9},{"id":"Children,_youth,_and_families","type":"interest","degree":13},{"id":"Chioma_Chinwokwu-Njemanze","type":"person","degree":5},{"id":"Community_practice","type":"interest","degree":10},{"id":"De'An_Roper","type":"person","degree":12},{"id":"Dianna_Jones","type":"person","degree":7},{"id":"Direct_practice","type":"interest","degree":6},{"id":"Education","type":"interest","degree":11},{"id":"Eusebius_Small","type":"person","degree":15},{"id":"Evaluation","type":"interest","degree":10},{"id":"Evidence_synthesis","type":"interest","degree":3},{"id":"Genevieve_Graaf","type":"person","degree":17},{"id":"Health","type":"interest","degree":14},{"id":"Hui_Huang","type":"person","degree":27},{"id":"Human_trafficking","type":"interest","degree":3},{"id":"Immigrants_&_refugees","type":"interest","degree":6},{"id":"Implementation_science","type":"interest","degree":8},{"id":"Intellectual_and_developmental_disabilities_(IDD)","type":"interest","degree":5},{"id":"Intersectionality","type":"interest","degree":12},{"id":"Interventions","type":"interest","degree":13},{"id":"Jaclyn_Kirsch","type":"person","degree":7},{"id":"Jasmine_Davis","type":"person","degree":5},{"id":"Jen_Murphy","type":"person","degree":7},{"id":"Joshua_Awua","type":"person","degree":4},{"id":"Kathleen_Preble","type":"person","degree":15},{"id":"Kofi_Agboh","type":"person","degree":3},{"id":"Krishna_Kiran_Kota","type":"person","degree":9},{"id":"Kristin_Gigli","type":"person","degree":7},{"id":"LGBTQ","type":"interest","degree":3},{"id":"Maryam_Rafieifar","type":"person","degree":24},{"id":"Memory","type":"interest","degree":1},{"id":"Mental_health","type":"interest","degree":19},{"id":"Mixed_methods","type":"interest","degree":14},{"id":"Natalie_Pope","type":"person","degree":9},{"id":"Nature","type":"interest","degree":5},{"id":"Older_adults","type":"interest","degree":3},{"id":"Organizational_Networks","type":"interest","degree":2},{"id":"Parental_Incarceration","type":"interest","degree":1},{"id":"Policy","type":"interest","degree":9},{"id":"Qualitative_methods","type":"interest","degree":12},{"id":"Quantitative_methods","type":"interest","degree":14},{"id":"Rebecca_Mauldin","type":"person","degree":15},{"id":"Scott_Ryan","type":"person","degree":23},{"id":"Services_&_access","type":"interest","degree":9},{"id":"Sexual_consent","type":"interest","degree":1},{"id":"Shamila_Sivakumaran","type":"person","degree":4},{"id":"Sleep","type":"interest","degree":2},{"id":"Social_isolation_and_loneliness","type":"interest","degree":4},{"id":"Social_support","type":"interest","degree":12},{"id":"Substance_use","type":"interest","degree":11},{"id":"Survivors","type":"interest","degree":4},{"id":"Tasha_Pelletier","type":"person","degree":17},{"id":"Technology","type":"interest","degree":10},{"id":"Trauma","type":"interest","degree":7},{"id":"Victoria_Green","type":"person","degree":10},{"id":"Violence_prevention","type":"interest","degree":6},{"id":"Vismaya_Prakasan","type":"person","degree":5},{"id":"Well-being","type":"interest","degree":12},{"id":"Women","type":"interest","degree":10},{"id":"Workforce","type":"interest","degree":10},{"id":"Yao_Wang","type":"person","degree":9}],"edges":[{"source":"Akshay_Thakare","target":"Child_welfare"},{"source":"Akshay_Thakare","target":"Education"},{"source":"Akshay_Thakare","target":"Health"},{"source":"Akshay_Thakare","target":"Mental_health"},{"source":"Akshay_Thakare","target":"Nature"},{"source":"Akshay_Thakare","target":"Organizational_Networks"},{"source":"Akshay_Thakare","target":"Technology"},{"source":"Akshay_Thakare","target":"Well-being"},{"source":"Akshay_Thakare","target":"Women"},{"source":"Akshay_Thakare","target":"Workforce"},{"source":"Alan_Kunz_Lomelin","target":"Direct_practice"},{"source":"Alan_Kunz_Lomelin","target":"Health"},{"source":"Alan_Kunz_Lomelin","target":"Implementation_science"},{"source":"Alan_Kunz_Lomelin","target":"Mental_health"},{"source":"Alan_Kunz_Lomelin","target":"Quantitative_methods"},{"source":"Alan_Kunz_Lomelin","target":"Substance_use"},{"source":"Alan_Kunz_Lomelin","target":"Technology"},{"source":"Blessing_Ramsey-Soroghaye","target":"Health"},{"source":"Blessing_Ramsey-Soroghaye","target":"Human_trafficking"},{"source":"Blessing_Ramsey-Soroghaye","target":"Immigrants_&_refugees"},{"source":"Blessing_Ramsey-Soroghaye","target":"Intersectionality"},{"source":"Blessing_Ramsey-Soroghaye","target":"Interventions"},{"source":"Blessing_Ramsey-Soroghaye","target":"Qualitative_methods"},{"source":"Blessing_Ramsey-Soroghaye","target":"Services_&_access"},{"source":"Blessing_Ramsey-Soroghaye","target":"Social_support"},{"source":"Blessing_Ramsey-Soroghaye","target":"Survivors"},{"source":"Blessing_Ramsey-Soroghaye","target":"Technology"},{"source":"Blessing_Ramsey-Soroghaye","target":"Violence_prevention"},{"source":"Blessing_Ramsey-Soroghaye","target":"Well-being"},{"source":"Blessing_Ramsey-Soroghaye","target":"Women"},{"source":"Carol_Lee","target":"Health"},{"source":"Carol_Lee","target":"Implementation_science"},{"source":"Carol_Lee","target":"Interventions"},{"source":"Carol_Lee","target":"Mental_health"},{"source":"Carol_Lee","target":"Mixed_methods"},{"source":"Carol_Lee","target":"Quantitative_methods"},{"source":"Carol_Lee","target":"Substance_use"},{"source":"Carol_Lee","target":"Technology"},{"source":"Chenyu_Zhao","target":"Community_practice"},{"source":"Chenyu_Zhao","target":"Education"},{"source":"Chenyu_Zhao","target":"Evaluation"},{"source":"Chenyu_Zhao","target":"Implementation_science"},{"source":"Chenyu_Zhao","target":"Intersectionality"},{"source":"Chenyu_Zhao","target":"Interventions"},{"source":"Chenyu_Zhao","target":"Mental_health"},{"source":"Chenyu_Zhao","target":"Mixed_methods"},{"source":"Chenyu_Zhao","target":"Nature"},{"source":"Chenyu_Zhao","target":"Quantitative_methods"},{"source":"Chenyu_Zhao","target":"Services_&_access"},{"source":"Chenyu_Zhao","target":"Sleep"},{"source":"Chenyu_Zhao","target":"Social_support"},{"source":"Chenyu_Zhao","target":"Well-being"},{"source":"Chenyu_Zhao","target":"Workforce"},{"source":"Chioma_Chinwokwu-Njemanze","target":"Children,_youth,_and_families"},{"source":"Chioma_Chinwokwu-Njemanze","target":"Immigrants_&_refugees"},{"source":"Chioma_Chinwokwu-Njemanze","target":"Intellectual_and_developmental_disabilities_(IDD)"},{"source":"Chioma_Chinwokwu-Njemanze","target":"Intersectionality"},{"source":"Chioma_Chinwokwu-Njemanze","target":"Women"},{"source":"De'An_Roper","target":"Direct_practice"},{"source":"De'An_Roper","target":"Education"},{"source":"De'An_Roper","target":"Intersectionality"},{"source":"De'An_Roper","target":"Interventions"},{"source":"De'An_Roper","target":"LGBTQ"},{"source":"De'An_Roper","target":"Mental_health"},{"source":"De'An_Roper","target":"Mixed_methods"},{"source":"De'An_Roper","target":"Nature"},{"source":"De'An_Roper","target":"Substance_use"},{"source":"De'An_Roper","target":"Technology"},{"source":"De'An_Roper","target":"Women"},{"source":"De'An_Roper","target":"Workforce"},{"source":"Dianna_Jones","target":"Administrative_practice"},{"source":"Dianna_Jones","target":"Community_practice"},{"source":"Dianna_Jones","target":"Education"},{"source":"Dianna_Jones","target":"Evaluation"},{"source":"Dianna_Jones","target":"Implementation_science"},{"source":"Dianna_Jones","target":"Well-being"},{"source":"Dianna_Jones","target":"Workforce"},{"source":"Eusebius_Small","target":"Child_welfare"},{"source":"Eusebius_Small","target":"Children,_youth,_and_families"},{"source":"Eusebius_Small","target":"Community_practice"},{"source":"Eusebius_Small","target":"Health"},{"source":"Eusebius_Small","target":"Immigrants_&_refugees"},{"source":"Eusebius_Small","target":"Intersectionality"},{"source":"Eusebius_Small","target":"Interventions"},{"source":"Eusebius_Small","target":"Mental_health"},{"source":"Eusebius_Small","target":"Mixed_methods"},{"source":"Eusebius_Small","target":"Policy"},{"source":"Eusebius_Small","target":"Qualitative_methods"},{"source":"Eusebius_Small","target":"Quantitative_methods"},{"source":"Eusebius_Small","target":"Substance_use"},{"source":"Eusebius_Small","target":"Violence_prevention"},{"source":"Eusebius_Small","target":"Women"},{"source":"Genevieve_Graaf","target":"Administrative_practice"},{"source":"Genevieve_Graaf","target":"Adoptions"},{"source":"Genevieve_Graaf","target":"Child_welfare"},{"source":"Genevieve_Graaf","target":"Children,_youth,_and_families"},{"source":"Genevieve_Graaf","target":"Community_practice"},{"source":"Genevieve_Graaf","target":"Evidence_synthesis"},{"source":"Genevieve_Graaf","target":"Implementation_science"},{"source":"Genevieve_Graaf","target":"Intellectual_and_developmental_disabilities_(IDD)"},{"source":"Genevieve_Graaf","target":"Interventions"},{"source":"Genevieve_Graaf","target":"Mental_health"},{"source":"Genevieve_Graaf","target":"Mixed_methods"},{"source":"Genevieve_Graaf","target":"Policy"},{"source":"Genevieve_Graaf","target":"Qualitative_methods"},{"source":"Genevieve_Graaf","target":"Quantitative_methods"},{"source":"Genevieve_Graaf","target":"Services_&_access"},{"source":"Genevieve_Graaf","target":"Social_support"},{"source":"Genevieve_Graaf","target":"Workforce"},{"source":"Hui_Huang","target":"Adoptions"},{"source":"Hui_Huang","target":"Child_welfare"},{"source":"Hui_Huang","target":"Children,_youth,_and_families"},{"source":"Hui_Huang","target":"Community_practice"},{"source":"Hui_Huang","target":"Education"},{"source":"Hui_Huang","target":"Evaluation"},{"source":"Hui_Huang","target":"Evidence_synthesis"},{"source":"Hui_Huang","target":"Health"},{"source":"Hui_Huang","target":"Implementation_science"},{"source":"Hui_Huang","target":"Intersectionality"},{"source":"Hui_Huang","target":"Interventions"},{"source":"Hui_Huang","target":"Mental_health"},{"source":"Hui_Huang","target":"Mixed_methods"},{"source":"Hui_Huang","target":"Policy"},{"source":"Hui_Huang","target":"Qualitative_methods"},{"source":"Hui_Huang","target":"Quantitative_methods"},{"source":"Hui_Huang","target":"Services_&_access"},{"source":"Hui_Huang","target":"Sexual_consent"},{"source":"Hui_Huang","target":"Social_support"},{"source":"Hui_Huang","target":"Substance_use"},{"source":"Hui_Huang","target":"Survivors"},{"source":"Hui_Huang","target":"Technology"},{"source":"Hui_Huang","target":"Trauma"},{"source":"Hui_Huang","target":"Violence_prevention"},{"source":"Hui_Huang","target":"Well-being"},{"source":"Hui_Huang","target":"Women"},{"source":"Hui_Huang","target":"Workforce"},{"source":"Jaclyn_Kirsch","target":"Direct_practice"},{"source":"Jaclyn_Kirsch","target":"Education"},{"source":"Jaclyn_Kirsch","target":"Immigrants_&_refugees"},{"source":"Jaclyn_Kirsch","target":"Mental_health"},{"source":"Jaclyn_Kirsch","target":"Mixed_methods"},{"source":"Jaclyn_Kirsch","target":"Trauma"},{"source":"Jaclyn_Kirsch","target":"Well-being"},{"source":"Jasmine_Davis","target":"Child_welfare"},{"source":"Jasmine_Davis","target":"Children,_youth,_and_families"},{"source":"Jasmine_Davis","target":"Direct_practice"},{"source":"Jasmine_Davis","target":"Mental_health"},{"source":"Jasmine_Davis","target":"Social_support"},{"source":"Jen_Murphy","target":"Children,_youth,_and_families"},{"source":"Jen_Murphy","target":"Education"},{"source":"Jen_Murphy","target":"Mental_health"},{"source":"Jen_Murphy","target":"Policy"},{"source":"Jen_Murphy","target":"Quantitative_methods"},{"source":"Jen_Murphy","target":"Services_&_access"},{"source":"Jen_Murphy","target":"Workforce"},{"source":"Joshua_Awua","target":"Interventions"},{"source":"Joshua_Awua","target":"Social_support"},{"source":"Joshua_Awua","target":"Substance_use"},{"source":"Joshua_Awua","target":"Technology"},{"source":"Kathleen_Preble","target":"Community_practice"},{"source":"Kathleen_Preble","target":"Evaluation"},{"source":"Kathleen_Preble","target":"Human_trafficking"},{"source":"Kathleen_Preble","target":"Immigrants_&_refugees"},{"source":"Kathleen_Preble","target":"Intersectionality"},{"source":"Kathleen_Preble","target":"Interventions"},{"source":"Kathleen_Preble","target":"Mixed_methods"},{"source":"Kathleen_Preble","target":"Qualitative_methods"},{"source":"Kathleen_Preble","target":"Services_&_access"},{"source":"Kathleen_Preble","target":"Social_support"},{"source":"Kathleen_Preble","target":"Substance_use"},{"source":"Kathleen_Preble","target":"Trauma"},{"source":"Kathleen_Preble","target":"Violence_prevention"},{"source":"Kathleen_Preble","target":"Well-being"},{"source":"Kathleen_Preble","target":"Women"},{"source":"Kofi_Agboh","target":"Health"},{"source":"Kofi_Agboh","target":"Social_support"},{"source":"Kofi_Agboh","target":"Substance_use"},{"source":"Krishna_Kiran_Kota","target":"Health"},{"source":"Krishna_Kiran_Kota","target":"Implementation_science"},{"source":"Krishna_Kiran_Kota","target":"Intersectionality"},{"source":"Krishna_Kiran_Kota","target":"LGBTQ"},{"source":"Krishna_Kiran_Kota","target":"Mental_health"},{"source":"Krishna_Kiran_Kota","target":"Mixed_methods"},{"source":"Krishna_Kiran_Kota","target":"Qualitative_methods"},{"source":"Krishna_Kiran_Kota","target":"Quantitative_methods"},{"source":"Krishna_Kiran_Kota","target":"Substance_use"},{"source":"Kristin_Gigli","target":"Children,_youth,_and_families"},{"source":"Kristin_Gigli","target":"Health"},{"source":"Kristin_Gigli","target":"Mental_health"},{"source":"Kristin_Gigli","target":"Policy"},{"source":"Kristin_Gigli","target":"Qualitative_methods"},{"source":"Kristin_Gigli","target":"Quantitative_methods"},{"source":"Kristin_Gigli","target":"Workforce"},{"source":"Maryam_Rafieifar","target":"Child_welfare"},{"source":"Maryam_Rafieifar","target":"Children,_youth,_and_families"},{"source":"Maryam_Rafieifar","target":"Community_practice"},{"source":"Maryam_Rafieifar","target":"Education"},{"source":"Maryam_Rafieifar","target":"Evaluation"},{"source":"Maryam_Rafieifar","target":"Evidence_synthesis"},{"source":"Maryam_Rafieifar","target":"Health"},{"source":"Maryam_Rafieifar","target":"Human_trafficking"},{"source":"Maryam_Rafieifar","target":"Immigrants_&_refugees"},{"source":"Maryam_Rafieifar","target":"Intellectual_and_developmental_disabilities_(IDD)"},{"source":"Maryam_Rafieifar","target":"Intersectionality"},{"source":"Maryam_Rafieifar","target":"Mental_health"},{"source":"Maryam_Rafieifar","target":"Mixed_methods"},{"source":"Maryam_Rafieifar","target":"Policy"},{"source":"Maryam_Rafieifar","target":"Qualitative_methods"},{"source":"Maryam_Rafieifar","target":"Quantitative_methods"},{"source":"Maryam_Rafieifar","target":"Services_&_access"},{"source":"Maryam_Rafieifar","target":"Social_isolation_and_loneliness"},{"source":"Maryam_Rafieifar","target":"Social_support"},{"source":"Maryam_Rafieifar","target":"Survivors"},{"source":"Maryam_Rafieifar","target":"Trauma"},{"source":"Maryam_Rafieifar","target":"Violence_prevention"},{"source":"Maryam_Rafieifar","target":"Well-being"},{"source":"Maryam_Rafieifar","target":"Women"},{"source":"Natalie_Pope","target":"Community_practice"},{"source":"Natalie_Pope","target":"Evaluation"},{"source":"Natalie_Pope","target":"Implementation_science"},{"source":"Natalie_Pope","target":"Interventions"},{"source":"Natalie_Pope","target":"Older_adults"},{"source":"Natalie_Pope","target":"Policy"},{"source":"Natalie_Pope","target":"Qualitative_methods"},{"source":"Natalie_Pope","target":"Quantitative_methods"},{"source":"Natalie_Pope","target":"Technology"},{"source":"Rebecca_Mauldin","target":"Community_practice"},{"source":"Rebecca_Mauldin","target":"Education"},{"source":"Rebecca_Mauldin","target":"Evaluation"},{"source":"Rebecca_Mauldin","target":"Health"},{"source":"Rebecca_Mauldin","target":"Interventions"},{"source":"Rebecca_Mauldin","target":"Mixed_methods"},{"source":"Rebecca_Mauldin","target":"Nature"},{"source":"Rebecca_Mauldin","target":"Older_adults"},{"source":"Rebecca_Mauldin","target":"Organizational_Networks"},{"source":"Rebecca_Mauldin","target":"Qualitative_methods"},{"source":"Rebecca_Mauldin","target":"Quantitative_methods"},{"source":"Rebecca_Mauldin","target":"Social_isolation_and_loneliness"},{"source":"Rebecca_Mauldin","target":"Social_support"},{"source":"Rebecca_Mauldin","target":"Technology"},{"source":"Rebecca_Mauldin","target":"Well-being"},{"source":"Scott_Ryan","target":"Adoptions"},{"source":"Scott_Ryan","target":"Child_welfare"},{"source":"Scott_Ryan","target":"Children,_youth,_and_families"},{"source":"Scott_Ryan","target":"Direct_practice"},{"source":"Scott_Ryan","target":"Education"},{"source":"Scott_Ryan","target":"Evaluation"},{"source":"Scott_Ryan","target":"Intellectual_and_developmental_disabilities_(IDD)"},{"source":"Scott_Ryan","target":"Intersectionality"},{"source":"Scott_Ryan","target":"Interventions"},{"source":"Scott_Ryan","target":"LGBTQ"},{"source":"Scott_Ryan","target":"Mental_health"},{"source":"Scott_Ryan","target":"Mixed_methods"},{"source":"Scott_Ryan","target":"Nature"},{"source":"Scott_Ryan","target":"Older_adults"},{"source":"Scott_Ryan","target":"Qualitative_methods"},{"source":"Scott_Ryan","target":"Quantitative_methods"},{"source":"Scott_Ryan","target":"Services_&_access"},{"source":"Scott_Ryan","target":"Sleep"},{"source":"Scott_Ryan","target":"Social_isolation_and_loneliness"},{"source":"Scott_Ryan","target":"Social_support"},{"source":"Scott_Ryan","target":"Trauma"},{"source":"Scott_Ryan","target":"Well-being"},{"source":"Scott_Ryan","target":"Workforce"},{"source":"Shamila_Sivakumaran","target":"Children,_youth,_and_families"},{"source":"Shamila_Sivakumaran","target":"Education"},{"source":"Shamila_Sivakumaran","target":"Parental_Incarceration"},{"source":"Shamila_Sivakumaran","target":"Well-being"},{"source":"Tasha_Pelletier","target":"Child_welfare"},{"source":"Tasha_Pelletier","target":"Children,_youth,_and_families"},{"source":"Tasha_Pelletier","target":"Community_practice"},{"source":"Tasha_Pelletier","target":"Direct_practice"},{"source":"Tasha_Pelletier","target":"Intellectual_and_developmental_disabilities_(IDD)"},{"source":"Tasha_Pelletier","target":"Intersectionality"},{"source":"Tasha_Pelletier","target":"Interventions"},{"source":"Tasha_Pelletier","target":"Memory"},{"source":"Tasha_Pelletier","target":"Mental_health"},{"source":"Tasha_Pelletier","target":"Policy"},{"source":"Tasha_Pelletier","target":"Social_isolation_and_loneliness"},{"source":"Tasha_Pelletier","target":"Substance_use"},{"source":"Tasha_Pelletier","target":"Survivors"},{"source":"Tasha_Pelletier","target":"Trauma"},{"source":"Tasha_Pelletier","target":"Violence_prevention"},{"source":"Tasha_Pelletier","target":"Well-being"},{"source":"Tasha_Pelletier","target":"Women"},{"source":"Victoria_Green","target":"Children,_youth,_and_families"},{"source":"Victoria_Green","target":"Evaluation"},{"source":"Victoria_Green","target":"Health"},{"source":"Victoria_Green","target":"Mental_health"},{"source":"Victoria_Green","target":"Mixed_methods"},{"source":"Victoria_Green","target":"Policy"},{"source":"Victoria_Green","target":"Qualitative_methods"},{"source":"Victoria_Green","target":"Quantitative_methods"},{"source":"Victoria_Green","target":"Services_&_access"},{"source":"Victoria_Green","target":"Substance_use"},{"source":"Vismaya_Prakasan","target":"Health"},{"source":"Vismaya_Prakasan","target":"Mental_health"},{"source":"Vismaya_Prakasan","target":"Technology"},{"source":"Vismaya_Prakasan","target":"Women"},{"source":"Vismaya_Prakasan","target":"Workforce"},{"source":"Yao_Wang","target":"Child_welfare"},{"source":"Yao_Wang","target":"Children,_youth,_and_families"},{"source":"Yao_Wang","target":"Evaluation"},{"source":"Yao_Wang","target":"Health"},{"source":"Yao_Wang","target":"Intersectionality"},{"source":"Yao_Wang","target":"Mental_health"},{"source":"Yao_Wang","target":"Mixed_methods"},{"source":"Yao_Wang","target":"Social_support"},{"source":"Yao_Wang","target":"Trauma"}],"member_info":{"Akshay_Thakare":{"role":"Alumnus","institution":"UT Arlington College of Business","url":"https://www.linkedin.com/in/akshaythakare14/?originalSubdomain=in","email":"ant8718@mavs.uta.edu"},"Alan_Kunz_Lomelin":{"role":"Assistant Professor","institution":"Florida Atlantic University","url":"https://www.fau.edu/sw-cj/ssw/faculty-and-staff/people/kunz-lomelin/","email":"akunzlomelin@fau.edu"},"Blessing_Ramsey-Soroghaye":{"role":"PhD Student","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/schools-colleges/social-work/stories/fall-2025-phd-students/blessing-ramsey-soroghaye","email":"bxr3964@mavs.uta.edu"},"Carol_Lee":{"role":"Assistant Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=carol.lee","email":"carol.lee@uta.edu"},"Chenyu_Zhao":{"role":"PhD Student","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/schools-colleges/social-work/stories/chenyu-zhao","email":"cxz3595@mavs.uta.edu"},"Chioma_Chinwokwu-Njemanze":{"role":"PhD Student","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/schools-colleges/social-work/stories/chioma-chinwokwu-njemanze","email":"cxc8031@mavs.uta.edu"},"De'An_Roper":{"role":"Associate Professor Of Practice","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=dean.roper","email":"dean.roper@uta.edu"},"Dianna_Jones":{"role":"Assistant Professor of Practice","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=diana.jones2","email":"diana.jones2@uta.edu"},"Eusebius_Small":{"role":"Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=esmall","email":"esmall@uta.edu"},"Genevieve_Graaf":{"role":"Associate Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=genevieve.graaf","email":"genevieve.graaf@uta.edu"},"Hui_Huang":{"role":"Associate Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=hui.huang","email":"hui.huang@uta.edu"},"Jaclyn_Kirsch":{"role":"Assistant Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=jaclyn.kirsch","email":"jaclyn.kirsch@uta.edu"},"Jasmine_Davis":{"role":"PhD Student","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/schools-colleges/social-work/stories/fall-2025-phd-students/jasmine-davis","email":"jjd4875@mavs.uta.edu"},"Jen_Murphy":{"role":"Assistant Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=jennifer.murphy","email":"jennifer.murphy@uta.edu"},"Joshua_Awua":{"role":"Postdoctoral Fellow","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=joshua.awua","email":"joshua.awua@uta.edu"},"Kathleen_Preble":{"role":"Associate Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=kathleen.preble","email":"kathleen.preble@uta.edu"},"Kofi_Agboh":{"role":"PhD Student","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/schools-colleges/social-work/stories/fall-2025-phd-students/herman-nuake-kofi-agboh","email":"hxa1023@mavs.uta.edu"},"Krishna_Kiran_Kota":{"role":"Assistant Professor of Research","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=krishnakiran.kota","email":"krishnakiran.kota@uta.edu"},"Kristin_Gigli":{"role":"Assistant Professor","institution":"UT Arlington College of Nursing and Health Innovations","url":"https://www.uta.edu/academics/faculty/profile?user=kristin.gigli","email":"kristin.gigli@uta.edu"},"Maryam_Rafieifar":{"role":"Assistant Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=maryam.rafieifar","email":"maryam.rafieifar@uta.edu"},"Natalie_Pope":{"role":"Doctoral Candidate","institution":"Rutgers University School of Social Work","url":"https://socialwork.rutgers.edu/natalie-pope","email":"natalie.pope@rutgers.edu"},"Rebecca_Mauldin":{"role":"Associate Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=rebecca.mauldin","email":"rebecca.mauldin@uta.edu"},"Scott_Ryan":{"role":"Professor","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=sdryan","email":"sdryan@uta.edu"},"Shamila_Sivakumaran":{"role":"PhD Student","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/schools-colleges/social-work/stories/shamila-sivakumaran","email":"sxs4050@mavs.uta.edu"},"Tasha_Pelletier":{"role":"PhD Student","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/schools-colleges/social-work/stories/tasha-pelletier","email":"tasha.pelletier@mavs.uta.edu"},"Victoria_Green":{"role":"Postdoctoral Fellow","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=victoria.green","email":"victoria.green@uta.edu"},"Vismaya_Prakasan":{"role":"Alumnus","institution":"UT Arlington College of Business","url":"https://www.linkedin.com/in/vismaya-prakasan","email":"vxp4696@mavs.uta.edu"},"Yao_Wang":{"role":"","institution":"UT Arlington School of Social Work","url":"https://www.uta.edu/academics/faculty/profile?user=yao.wang","email":"yao.wang@uta.edu"}}};
+
+// Build adjacency for fast lookup
+const adjMap = {};
+graphData.nodes.forEach(n => adjMap[n.id] = new Set());
+graphData.edges.forEach(e => {
+  adjMap[e.source].add(e.target);
+  adjMap[e.target].add(e.source);
+});
+
+function formatLabel(id) {
+  return id.replace(/_/g, ' ').replace(/,_/g, ', ');
+}
+
+const svg = d3.select('#svg');
+const container = document.getElementById('graph-container');
+
+let width = container.clientWidth;
+let height = container.clientHeight;
+
+const g = svg.append('g');
+
+// Zoom
+const zoom = d3.zoom()
+  .scaleExtent([0.15, 4])
+  .on('zoom', (event) => g.attr('transform', event.transform));
+svg.call(zoom);
+
+// Node size based on degree
+function nodeSize(d) {
+  const base = d.type === 'person' ? 12 : 9;
+  return base + Math.sqrt(d.degree) * 2.2;
+}
+
+// Force simulation
+const sim = d3.forceSimulation(graphData.nodes)
+  .force('link', d3.forceLink(graphData.edges).id(d => d.id).distance(d => {
+    return 160 + (d.source.degree + d.target.degree) * 2.5;
+  }).strength(0.25))
+  .force('charge', d3.forceManyBody().strength(-900).distanceMax(800))
+  .force('center', d3.forceCenter(width / 2, height / 2))
+  .force('collision', d3.forceCollide().radius(d => nodeSize(d) + 32).strength(1));
+
+// Links
+const linkSel = g.append('g').attr('class', 'links')
+  .selectAll('line')
+  .data(graphData.edges)
+  .enter().append('line')
+  .attr('class', 'link')
+  .attr('stroke-width', 1);
+
+// Nodes
+const nodeSel = g.append('g').attr('class', 'nodes')
+  .selectAll('g')
+  .data(graphData.nodes)
+  .enter().append('g')
+  .attr('class', d => `node ${d.type}`)
+  .call(d3.drag()
+    .on('start', dragStart)
+    .on('drag', dragged)
+    .on('end', dragEnd))
+  .on('click', onNodeClick)
+  .on('mouseover', onNodeOver)
+  .on('mouseout', onNodeOut);
+
+nodeSel.append('rect')
+  .attr('rx', d => d.type === 'person' ? 50 : 4)
+  .attr('ry', d => d.type === 'person' ? 50 : 4)
+  .each(function(d) {
+    const s = nodeSize(d);
+    d3.select(this)
+      .attr('width', s * 2)
+      .attr('height', s * 2)
+      .attr('x', -s)
+      .attr('y', -s);
+  });
+
+nodeSel.append('text')
+  .text(d => formatLabel(d.id))
+  .attr('text-anchor', 'middle')
+  .attr('dy', d => nodeSize(d) + 11)
+  .attr('font-size', d => Math.max(9, Math.min(12, 8 + d.degree * 0.15)) + 'px');
+
+sim.on('tick', () => {
+  linkSel
+    .attr('x1', d => d.source.x)
+    .attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x)
+    .attr('y2', d => d.target.y);
+  nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+});
+
+// Drag
+function dragStart(event, d) {
+  if (!event.active) sim.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+function dragEnd(event, d) {
+  if (!event.active) sim.alphaTarget(0);
+  d.fx = null; d.fy = null;
+}
+
+// Tooltip
+const tooltip = document.getElementById('tooltip');
+function onNodeOver(event, d) {
+  tooltip.style.display = 'block';
+  tooltip.style.left = (event.pageX + 12) + 'px';
+  tooltip.style.top = (event.pageY - 28) + 'px';
+  tooltip.textContent = `${formatLabel(d.id)} · ${d.degree} connection${d.degree !== 1 ? 's' : ''}`;
+}
+function onNodeOut() { tooltip.style.display = 'none'; }
+
+// Highlight
+let selectedNode = null;
+
+function highlightNode(d) {
+  selectedNode = d;
+  const neighbors = adjMap[d.id];
+
+  linkSel.classed('highlighted', l => l.source.id === d.id || l.target.id === d.id)
+         .classed('dimmed', l => l.source.id !== d.id && l.target.id !== d.id);
+
+  nodeSel.classed('highlighted', n => n.id === d.id)
+         .classed('dimmed', n => n.id !== d.id && !neighbors.has(n.id));
+}
+
+function clearHighlight() {
+  selectedNode = null;
+  linkSel.classed('highlighted', false).classed('dimmed', false);
+  nodeSel.classed('highlighted', false).classed('dimmed', false);
+}
+
+// Panel
+const panel = document.getElementById('info-panel');
+
+function showPanel(d) {
+  const label = formatLabel(d.id);
+  const neighbors = [...adjMap[d.id]].sort();
+
+  document.getElementById('panel-title').textContent = label;
+  const typeEl = document.getElementById('panel-type');
+  typeEl.textContent = d.type === 'person' ? 'Person' : 'Interest';
+  typeEl.className = `panel-type ${d.type}`;
+
+  document.getElementById('conn-count').textContent = d.degree;
+
+  const personDetails = document.getElementById('person-details');
+  if (d.type === 'person' && graphData.member_info[d.id]) {
+    const info = graphData.member_info[d.id];
+    personDetails.style.display = 'block';
+    document.getElementById('p-role').textContent = info.role || '—';
+    document.getElementById('p-inst').textContent = info.institution || '—';
+    document.getElementById('p-email').innerHTML = info.email
+      ? `<a href="mailto:${info.email}">${info.email}</a>` : '—';
+    document.getElementById('p-url').innerHTML = info.url
+      ? `<a href="${info.url}" target="_blank">View Profile ↗</a>` : '—';
+  } else {
+    personDetails.style.display = 'none';
+  }
+
+  const chips = document.getElementById('conn-chips');
+  chips.innerHTML = '';
+  neighbors.forEach(nid => {
+    const ntype = graphData.nodes.find(x => x.id === nid)?.type || 'interest';
+    const btn = document.createElement('button');
+    btn.className = `conn-chip ${ntype}`;
+    btn.textContent = formatLabel(nid);
+    btn.onclick = () => {
+      const nd = graphData.nodes.find(x => x.id === nid);
+      if (nd) { highlightNode(nd); showPanel(nd); }
+    };
+    chips.appendChild(btn);
+  });
+
+  panel.classList.remove('hidden');
+}
+
+function onNodeClick(event, d) {
+  event.stopPropagation();
+  highlightNode(d);
+  showPanel(d);
+}
+
+svg.on('click', () => {
+  clearHighlight();
+  panel.classList.add('hidden');
+});
+
+document.getElementById('close-panel').onclick = () => {
+  clearHighlight();
+  panel.classList.add('hidden');
+};
+
+// Controls
+let paused = false;
+document.getElementById('btn-pause').onclick = function() {
+  paused = !paused;
+  if (paused) { sim.stop(); this.textContent = 'Resume Motion'; this.classList.add('active'); }
+  else { sim.alpha(0.3).restart(); this.textContent = 'Pause Motion'; this.classList.remove('active'); }
+};
+
+document.getElementById('btn-reset').onclick = () => {
+  svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity);
+  clearHighlight();
+  panel.classList.add('hidden');
+};
+
+document.getElementById('btn-fit').onclick = () => {
+  const bounds = g.node().getBBox();
+  const fullW = width, fullH = height;
+  const bW = bounds.width, bH = bounds.height;
+  const scale = Math.min(0.95 * fullW / bW, 0.95 * fullH / bH, 2);
+  const tx = fullW / 2 - scale * (bounds.x + bW / 2);
+  const ty = fullH / 2 - scale * (bounds.y + bH / 2);
+  svg.transition().duration(700).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+};
+
+// Search
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+
+searchInput.addEventListener('input', function() {
+  const q = this.value.trim().toLowerCase();
+  if (!q) { searchResults.style.display = 'none'; return; }
+  const matches = graphData.nodes.filter(n => formatLabel(n.id).toLowerCase().includes(q)).slice(0, 10);
+  if (!matches.length) { searchResults.style.display = 'none'; return; }
+  searchResults.innerHTML = matches.map(n =>
+    `<div class="search-item" data-id="${n.id}">${formatLabel(n.id)}<span class="badge ${n.type}">${n.type}</span></div>`
+  ).join('');
+  searchResults.style.display = 'block';
+});
+
+searchResults.addEventListener('click', function(e) {
+  const item = e.target.closest('.search-item');
+  if (!item) return;
+  const id = item.dataset.id;
+  const nd = graphData.nodes.find(x => x.id === id);
+  if (!nd) return;
+  searchInput.value = formatLabel(id);
+  searchResults.style.display = 'none';
+  highlightNode(nd);
+  showPanel(nd);
+  // Pan to node
+  if (nd.x !== undefined) {
+    const scale = 1.2;
+    const tx = width / 2 - scale * nd.x;
+    const ty = height / 2 - scale * nd.y;
+    svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+  }
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#search-wrap')) searchResults.style.display = 'none';
+});
+
+// Resize
+window.addEventListener('resize', () => {
+  width = container.clientWidth;
+  height = container.clientHeight;
+  sim.force('center', d3.forceCenter(width / 2, height / 2));
+});
+</script>
+</body>
+</html>
